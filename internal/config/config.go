@@ -25,8 +25,10 @@ type Config struct {
 	LowercaseNames bool
 	Include        []string
 	Exclude        []string
+	// CreateEmptyGroups also creates groups that would have no member.
+	CreateEmptyGroups bool
 
-	DryRun      bool
+	DryRun     bool
 	Interval    time.Duration
 	RunOnce     bool
 	MaxRemovals int
@@ -67,6 +69,9 @@ func Load(getenv func(string) string, readFile func(string) ([]byte, error)) (Co
 		errs = append(errs, errors.New("GROUP_PREFIX is required: it marks the groups this tool owns"))
 	}
 	if c.LowercaseNames, err = boolean("GROUP_NAME_LOWERCASE", getenv("GROUP_NAME_LOWERCASE"), true); err != nil {
+		errs = append(errs, err)
+	}
+	if c.CreateEmptyGroups, err = boolean("CREATE_EMPTY_GROUPS", getenv("CREATE_EMPTY_GROUPS"), false); err != nil {
 		errs = append(errs, err)
 	}
 	// Writing is opt-in: anything but an explicit "false" keeps the dry run.

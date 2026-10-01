@@ -36,7 +36,7 @@ func main() {
 	hc := &http.Client{Timeout: 30 * time.Second}
 	zc := zitadel.New(cfg.ZitadelURL, cfg.ZitadelToken, cfg.ZitadelOrgID, hc)
 	nc := netbird.New(cfg.NetbirdURL, cfg.NetbirdToken, hc)
-	opt := syncer.Options{Prefix: cfg.GroupPrefix, Lowercase: cfg.LowercaseNames, Include: cfg.Include, Exclude: cfg.Exclude}
+	opt := syncer.Options{Prefix: cfg.GroupPrefix, Lowercase: cfg.LowercaseNames, Include: cfg.Include, Exclude: cfg.Exclude, CreateEmpty: cfg.CreateEmptyGroups}
 
 	log.Info("starting", "dry_run", cfg.DryRun, "interval", cfg.Interval.String(), "prefix", cfg.GroupPrefix, "run_once", cfg.RunOnce)
 
