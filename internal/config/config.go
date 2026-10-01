@@ -28,7 +28,7 @@ type Config struct {
 	// CreateEmptyGroups also creates groups that would have no member.
 	CreateEmptyGroups bool
 
-	DryRun     bool
+	DryRun      bool
 	Interval    time.Duration
 	RunOnce     bool
 	MaxRemovals int
