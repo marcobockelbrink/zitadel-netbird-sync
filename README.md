@@ -18,7 +18,9 @@ it works on NetBird Cloud and self-hosted alike.
 On every run it reads both sides completely and applies the difference. It keeps
 no state of its own.
 
-- One NetBird group per Zitadel project, named `<prefix><project>`.
+- One NetBird group per Zitadel project, named `<prefix><project>`. The group
+  is created with its first member; a project nobody in NetBird belongs to gets
+  no group unless `CREATE_EMPTY_GROUPS=true`.
 - A NetBird user is put into the group if the Zitadel user with the same email
   address holds an active grant on that project, whatever the role.
 - When the grant goes, the membership goes at the next run.
@@ -61,6 +63,7 @@ Everything is set through environment variables.
 | `GROUP_NAME_LOWERCASE` | no | `true` | Lower-case the project name in the group name |
 | `INCLUDE_PROJECTS` | no | all | Comma-separated project names to sync |
 | `EXCLUDE_PROJECTS` | no | none | Comma-separated project names to leave out |
+| `CREATE_EMPTY_GROUPS` | no | `false` | Also create groups that would have no member |
 | `DRY_RUN` | no | `true` | Set to `false` to write |
 | `SYNC_INTERVAL` | no | `10m` | Pause between runs, at least `1m` |
 | `RUN_ONCE` | no | `false` | Run once and exit; exit code 1 on failure |

@@ -75,6 +75,33 @@ func TestBuildPlan(t *testing.T) {
 	}
 }
 
+// A project nobody in NetBird belongs to gets no group, unless asked for.
+func TestBuildPlanSkipsEmptyGroups(t *testing.T) {
+	in := snapshot()
+	in.Projects = append(in.Projects, zitadel.Project{ID: "p4", Name: "Gamma"}, zitadel.Project{ID: "p5", Name: "Delta"})
+	// Dave holds a grant on Gamma but has never logged in to NetBird.
+	in.Grants = append(in.Grants, zitadel.Grant{UserID: "z3", ProjectID: "p4"})
+	in.Emails["z3"] = "dave@example.org"
+
+	plan, err := BuildPlan(in, testOpt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"idp-beta"}; !reflect.DeepEqual(plan.CreateGroups, want) {
+		t.Errorf("CreateGroups = %v, want %v", plan.CreateGroups, want)
+	}
+
+	opt := testOpt
+	opt.CreateEmpty = true
+	plan, err = BuildPlan(in, opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"idp-beta", "idp-delta", "idp-gamma"}; !reflect.DeepEqual(plan.CreateGroups, want) {
+		t.Errorf("with CreateEmpty: CreateGroups = %v, want %v", plan.CreateGroups, want)
+	}
+}
+
 func TestBuildPlanRefusesDangerousInput(t *testing.T) {
 	in := snapshot()
 

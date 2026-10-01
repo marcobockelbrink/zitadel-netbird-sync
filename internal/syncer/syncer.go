@@ -25,6 +25,9 @@ type Options struct {
 	Include []string
 	// Exclude removes project names, also from an Include list.
 	Exclude []string
+	// CreateEmpty also creates groups for projects that no NetBird user
+	// belongs to. By default a group appears with its first member.
+	CreateEmpty bool
 }
 
 // Input is one consistent snapshot of both systems.
@@ -125,17 +128,14 @@ func BuildPlan(in Input, opt Options) (Plan, error) {
 	}
 
 	var plan Plan
-	for name := range desiredGroups {
-		if _, exists := idOfGroup[name]; !exists {
-			plan.CreateGroups = append(plan.CreateGroups, name)
-		}
-	}
 	for name := range idOfGroup {
 		if !desiredGroups[name] {
 			plan.Orphaned = append(plan.Orphaned, name)
 		}
 	}
 
+	// populated are the desired groups at least one NetBird user belongs to.
+	populated := map[string]bool{}
 	for _, u := range in.Users {
 		if u.IsServiceUser {
 			continue
@@ -153,6 +153,7 @@ func BuildPlan(in Input, opt Options) (Plan, error) {
 		}
 		upd := UserUpdate{User: u}
 		for name := range want[email] {
+			populated[name] = true
 			upd.Managed = append(upd.Managed, name)
 			if !have[name] {
 				upd.Add = append(upd.Add, name)
@@ -170,6 +171,12 @@ func BuildPlan(in Input, opt Options) (Plan, error) {
 		sort.Strings(upd.Remove)
 		sort.Strings(upd.Managed)
 		plan.Updates = append(plan.Updates, upd)
+	}
+
+	for name := range desiredGroups {
+		if _, exists := idOfGroup[name]; !exists && (opt.CreateEmpty || populated[name]) {
+			plan.CreateGroups = append(plan.CreateGroups, name)
+		}
 	}
 
 	sort.Strings(plan.CreateGroups)
