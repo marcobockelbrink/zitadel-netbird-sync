@@ -13,6 +13,25 @@ NetBird Cloud offers IdP sync for a fixed list of providers and generic SCIM, an
 Zitadel cannot push SCIM. This tool closes that gap with the plain NetBird API:
 it works on NetBird Cloud and self-hosted alike.
 
+## Features
+
+- **Groups from projects.** One NetBird group per Zitadel project, with a
+  configurable name prefix.
+- **Members from grants.** Whoever holds a grant on the project is in the group;
+  a revoked grant removes the membership.
+- **Coexists with manual groups.** Only groups carrying the prefix are managed.
+- **Project selection.** Include and exclude lists by project name.
+- **Dry run first.** The default run only reports what it would change.
+- **Guard rails.** Stops on empty or incomplete input and on an unusual number
+  of removals.
+- **Runs continuously or once.** A built-in interval, or a single run for a
+  cron job or a pipeline.
+- **Stateless.** No database, no volume; every run compares both sides afresh.
+- **Small and plain.** One static binary, Go standard library only, a 3 MB
+  container image for `amd64` and `arm64` that runs as an unprivileged user.
+- **Structured logs.** JSON lines without email addresses or tokens.
+- **Verifiable releases.** Images carry a signed build provenance attestation.
+
 ## What it does
 
 On every run it reads both sides completely and applies the difference. It keeps
@@ -80,6 +99,28 @@ organization. The built-in role `ORG_OWNER_VIEWER` is meant for this.
 **NetBird:** a service user with the `admin` role. Changing a user's groups is
 part of user management, and NetBird has no narrower role that allows it.
 
+Creating the two tokens:
+
+1. Zitadel: create a service user, add it to the organization with the role
+   `ORG_OWNER_VIEWER`, then create a personal access token for it.
+2. NetBird: under *Team → Service Users* create a service user with the role
+   `admin`, then create an access token for it.
+
+Give both tokens an expiry date and keep them in a secret store.
+
+## Container image
+
+Every release publishes `ghcr.io/marcobockelbrink/zitadel-netbird-sync`.
+
+- **Tags:** `x.y.z`, `x.y` and `latest`. For production pin the version and its
+  digest.
+- **Platforms:** `linux/amd64` and `linux/arm64`.
+- **Contents:** the binary on a distroless base. No shell, no package manager.
+- **Runtime:** user `65532`, no ports, no writable file system needed.
+
+The image runs anywhere a container runs: Docker, Kubernetes, Nomad or a
+scheduled CI job.
+
 ## Run it
 
 Dry run, once:
@@ -96,6 +137,20 @@ docker run --rm \
 
 Read the plan in the log. When it is what you expect, run it continuously with
 `DRY_RUN=false`.
+
+What a dry run prints:
+
+```json
+{"level":"INFO","msg":"starting","dry_run":true,"interval":"10m0s","prefix":"idp-","run_once":true}
+{"level":"INFO","msg":"plan","projects":12,"grants":40,"netbird_users":25,"groups_to_create":1,"users_to_update":2,"removals":0}
+{"level":"INFO","msg":"dry run: would create group","group":"idp-alpha"}
+{"level":"INFO","msg":"dry run: would update user","user_id":"u-1","add":["idp-alpha"],"remove":null}
+{"level":"INFO","msg":"dry run: would update user","user_id":"u-2","add":["idp-alpha"],"remove":null}
+```
+
+Exit codes with `RUN_ONCE=true`: `0` success, `1` the run failed, `2` invalid
+configuration. Without `RUN_ONCE` a failed run is logged and retried at the
+next interval.
 
 Kubernetes, tokens mounted from a secret:
 
