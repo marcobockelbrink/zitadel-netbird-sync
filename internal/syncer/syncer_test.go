@@ -6,6 +6,8 @@ import (
 	"io"
 	"log/slog"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/marcobockelbrink/zitadel-netbird-sync/internal/netbird"
@@ -190,6 +192,57 @@ func TestApplyContinuesAfterUserFailure(t *testing.T) {
 	if len(w.sets) != 2 {
 		t.Errorf("updated %d users after one failure, want 2", len(w.sets))
 	}
+}
+
+// Whatever names and addresses arrive, the plan must stay inside the prefix:
+// it may only create, add and remove groups it owns.
+func FuzzBuildPlanStaysInsidePrefix(f *testing.F) {
+	f.Add("idp-", "Alpha", "team-alpha", "ann@example.org", true)
+	f.Add("x", "", "x", "", false)
+	f.Add("idp-", "idp-", "idp-", " ANN@example.org ", true)
+	f.Fuzz(func(t *testing.T, prefix, project, foreign, email string, lower bool) {
+		in := Input{
+			Projects: []zitadel.Project{{ID: "p1", Name: project}, {ID: "p2", Name: "Other"}},
+			Grants:   []zitadel.Grant{{UserID: "z1", ProjectID: "p1"}},
+			Emails:   map[string]string{"z1": email},
+			Groups:   []netbird.Group{{ID: "g-foreign", Name: foreign}, {ID: "g-own", Name: prefix + "old"}},
+			Users: []netbird.User{
+				{ID: "n1", Email: email, AutoGroups: []string{"g-foreign", "g-own"}},
+				{ID: "n2", Email: "someone@example.org", AutoGroups: []string{"g-foreign"}},
+			},
+		}
+		opt := Options{Prefix: prefix, Lowercase: lower}
+		plan, err := BuildPlan(in, opt)
+		if err != nil {
+			return
+		}
+		owned := func(name string) bool { return strings.HasPrefix(name, prefix) }
+		for _, name := range plan.CreateGroups {
+			if !owned(name) {
+				t.Fatalf("would create %q outside prefix %q", name, prefix)
+			}
+		}
+		for _, u := range plan.Updates {
+			for _, name := range append(append([]string{}, u.Add...), u.Remove...) {
+				if !owned(name) {
+					t.Fatalf("would change membership of %q outside prefix %q", name, prefix)
+				}
+			}
+		}
+
+		// Applying the plan must keep every group the sync does not own.
+		w := &fakeWriter{}
+		if err := Apply(context.Background(), w, in, plan, opt, quiet); err != nil {
+			t.Fatal(err)
+		}
+		if !owned(foreign) {
+			for id, ids := range w.sets {
+				if !slices.Contains(ids, "g-foreign") {
+					t.Fatalf("user %s lost a foreign group: %v", id, ids)
+				}
+			}
+		}
+	})
 }
 
 // A second run over the state the first run produced must change nothing.

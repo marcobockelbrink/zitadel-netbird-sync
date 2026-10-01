@@ -2,9 +2,12 @@
 
 ## Reporting a vulnerability
 
-Please report security problems privately through GitHub:
-**Security → Report a vulnerability** on this repository
-(private vulnerability reporting). Do not open a public issue.
+Please report security problems privately through GitHub's private vulnerability
+reporting:
+
+<https://github.com/marcobockelbrink/zitadel-netbird-sync/security/advisories/new>
+
+Do not open a public issue.
 
 You can expect a first answer within seven days. Please include the version or
 image digest you used and the steps to reproduce.
