@@ -1,0 +1,20 @@
+# Build output
+/zitadel-netbird-sync
+/dist/
+
+# Local configuration and credentials never belong in the repository
+.env
+.env.*
+*.token
+*.pat
+*.pem
+*.key
+
+# Local agent context, may hold private notes
+CLAUDE.local.md
+.claude/
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
