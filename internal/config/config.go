@@ -27,6 +27,9 @@ type Config struct {
 	Exclude        []string
 	// CreateEmptyGroups also creates groups that would have no member.
 	CreateEmptyGroups bool
+	// AllGroup names an optional collective group (after the prefix) with every
+	// user who is in at least one synced project. Empty means off.
+	AllGroup string
 
 	DryRun      bool
 	Interval    time.Duration
@@ -50,6 +53,7 @@ func Load(getenv func(string) string, readFile func(string) ([]byte, error)) (Co
 		GroupPrefix:  getenv("GROUP_PREFIX"),
 		Include:      splitList(getenv("INCLUDE_PROJECTS")),
 		Exclude:      splitList(getenv("EXCLUDE_PROJECTS")),
+		AllGroup:     strings.TrimSpace(getenv("ALL_GROUP")),
 	}
 
 	var err error

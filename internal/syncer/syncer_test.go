@@ -267,3 +267,87 @@ func TestPlanIsStableAfterApply(t *testing.T) {
 		t.Errorf("second plan not empty: %+v", again)
 	}
 }
+
+// The collective group holds everyone who is in at least one synced project.
+func TestBuildPlanAllGroup(t *testing.T) {
+	in := snapshot()
+	in.Groups = append(in.Groups, netbird.Group{ID: "g-all", Name: "idp-all"})
+	in.Users[2].AutoGroups = append(in.Users[2].AutoGroups, "g-all") // carol: no grant any more
+	in.Users[1].AutoGroups = append(in.Users[1].AutoGroups, "g-all") // bob: already in
+	opt := testOpt
+	opt.AllGroup = "All"
+
+	plan, err := BuildPlan(in, opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"idp-beta"}; !reflect.DeepEqual(plan.CreateGroups, want) {
+		t.Errorf("CreateGroups = %v, want %v", plan.CreateGroups, want)
+	}
+	if len(plan.Orphaned) != 1 || plan.Orphaned[0] != "idp-gone" {
+		t.Errorf("Orphaned = %v, the collective group must not count", plan.Orphaned)
+	}
+	got := map[string]UserUpdate{}
+	for _, u := range plan.Updates {
+		got[u.User.ID] = u
+	}
+	if want := []string{"idp-all", "idp-alpha"}; !reflect.DeepEqual(got["n1"].Add, want) {
+		t.Errorf("n1 add = %v, want %v", got["n1"].Add, want)
+	}
+	if want := []string{"idp-all", "idp-alpha", "idp-beta"}; !reflect.DeepEqual(got["n2"].Managed, want) {
+		t.Errorf("n2 managed = %v, want %v", got["n2"].Managed, want)
+	}
+	if want := []string{"idp-all", "idp-alpha"}; !reflect.DeepEqual(got["n3"].Remove, want) {
+		t.Errorf("n3 remove = %v, want %v", got["n3"].Remove, want)
+	}
+}
+
+// A user whose only grant is on an excluded project is in no synced project,
+// so the collective group does not take them either.
+func TestBuildPlanAllGroupIgnoresExcludedProjects(t *testing.T) {
+	in := snapshot()
+	in.Grants = []zitadel.Grant{{UserID: "z1", ProjectID: "p3"}}
+	opt := testOpt
+	opt.AllGroup = "all"
+
+	plan, err := BuildPlan(in, opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(plan.CreateGroups, "idp-all") {
+		t.Errorf("CreateGroups = %v, nobody belongs in idp-all", plan.CreateGroups)
+	}
+}
+
+// The collective group is only created once it has a member.
+func TestBuildPlanAllGroupNeedsMember(t *testing.T) {
+	in := snapshot()
+	in.Grants = nil
+	opt := testOpt
+	opt.AllGroup = "all"
+
+	plan, err := BuildPlan(in, opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(plan.CreateGroups, "idp-all") {
+		t.Errorf("CreateGroups = %v, idp-all would be empty", plan.CreateGroups)
+	}
+}
+
+// A project that maps onto the collective group's name must stop the run,
+// otherwise the two would silently share one group.
+func TestBuildPlanAllGroupCollision(t *testing.T) {
+	in := snapshot()
+	in.Projects = append(in.Projects, zitadel.Project{ID: "p9", Name: "All"})
+	opt := testOpt
+	opt.AllGroup = "all"
+
+	if _, err := BuildPlan(in, opt); err == nil {
+		t.Fatal("expected an error for a project named like the collective group")
+	}
+	// Without the feature the same project is an ordinary one.
+	if _, err := BuildPlan(in, testOpt); err != nil {
+		t.Fatalf("no AllGroup: %v", err)
+	}
+}
