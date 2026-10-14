@@ -28,6 +28,10 @@ type Options struct {
 	// CreateEmpty also creates groups for projects that no NetBird user
 	// belongs to. By default a group appears with its first member.
 	CreateEmpty bool
+	// AllGroup, when not empty, names a collective group (after the prefix)
+	// that holds every user who is in at least one synced project. NetBird
+	// has no nested groups, so this is the union, kept by the sync itself.
+	AllGroup string
 }
 
 // Input is one consistent snapshot of both systems.
@@ -110,6 +114,17 @@ func BuildPlan(in Input, opt Options) (Plan, error) {
 		nameOfOwnedID[g.ID] = g.Name
 	}
 
+	// The collective group is an owned group like the others, so it needs no
+	// special case further down. It must not share a name with a project.
+	allGroup := ""
+	if strings.TrimSpace(opt.AllGroup) != "" {
+		allGroup = groupName(opt.AllGroup, opt)
+		if desiredGroups[allGroup] {
+			return Plan{}, fmt.Errorf("a project maps to the collective group %q: rename it or change ALL_GROUP", allGroup)
+		}
+		desiredGroups[allGroup] = true
+	}
+
 	// Desired membership per email address.
 	want := map[string]map[string]bool{}
 	for _, g := range in.Grants {
@@ -125,6 +140,9 @@ func BuildPlan(in Input, opt Options) (Plan, error) {
 			want[email] = map[string]bool{}
 		}
 		want[email][group] = true
+		if allGroup != "" {
+			want[email][allGroup] = true
+		}
 	}
 
 	var plan Plan

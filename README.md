@@ -83,6 +83,7 @@ Everything is set through environment variables.
 | `INCLUDE_PROJECTS` | no | all | Comma-separated project names to sync |
 | `EXCLUDE_PROJECTS` | no | none | Comma-separated project names to leave out |
 | `CREATE_EMPTY_GROUPS` | no | `false` | Also create groups that would have no member |
+| `ALL_GROUP` | no | off | Name, after the prefix, of a group with every user who is in at least one synced project, e.g. `all` gives `idp-all`. NetBird has no nested groups, so the sync keeps this union itself. A project of the same name stops the run |
 | `DRY_RUN` | no | `true` | Set to `false` to write |
 | `SYNC_INTERVAL` | no | `10m` | Pause between runs, at least `1m` |
 | `RUN_ONCE` | no | `false` | Run once and exit; exit code 1 on failure |

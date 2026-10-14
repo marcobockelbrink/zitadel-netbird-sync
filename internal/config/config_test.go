@@ -97,3 +97,18 @@ func TestLoopbackHTTPAllowed(t *testing.T) {
 		t.Errorf("loopback http rejected: %v", err)
 	}
 }
+
+func TestAllGroup(t *testing.T) {
+	c, err := Load(env(valid()), noFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.AllGroup != "" {
+		t.Errorf("AllGroup = %q, must be off by default", c.AllGroup)
+	}
+	m := valid()
+	m["ALL_GROUP"] = " all "
+	if c, err = Load(env(m), noFile); err != nil || c.AllGroup != "all" {
+		t.Errorf("AllGroup = %q, err = %v, want all", c.AllGroup, err)
+	}
+}
