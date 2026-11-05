@@ -42,7 +42,8 @@ no state of its own.
   no group unless `CREATE_EMPTY_GROUPS=true`.
 - A NetBird user is put into the group if the Zitadel user with the same email
   address holds an active grant on that project, whatever the role.
-- When the grant goes, the membership goes at the next run.
+- When the grant goes, the membership goes at the next run. A NetBird user
+  without an email address matches no grant and loses every synced group.
 
 ## What it never does
 

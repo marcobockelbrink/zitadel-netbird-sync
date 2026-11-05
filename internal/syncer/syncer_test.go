@@ -53,8 +53,8 @@ func TestBuildPlan(t *testing.T) {
 	if want := []string{"idp-gone"}; !reflect.DeepEqual(plan.Orphaned, want) {
 		t.Errorf("Orphaned = %v, want %v", plan.Orphaned, want)
 	}
-	if plan.SkippedUsers != 1 {
-		t.Errorf("SkippedUsers = %d, want 1", plan.SkippedUsers)
+	if plan.UsersWithoutEmail != 1 {
+		t.Errorf("UsersWithoutEmail = %d, want 1", plan.UsersWithoutEmail)
 	}
 	if plan.Removals() != 2 {
 		t.Errorf("Removals = %d, want 2", plan.Removals())
@@ -349,5 +349,60 @@ func TestBuildPlanAllGroupCollision(t *testing.T) {
 	// Without the feature the same project is an ordinary one.
 	if _, err := BuildPlan(in, testOpt); err != nil {
 		t.Fatalf("no AllGroup: %v", err)
+	}
+}
+
+// A NetBird user whose email is missing cannot be matched to any grant, so it
+// is entitled to no owned group. Revocation must still reach it; groups the
+// sync does not own stay untouched.
+func TestBuildPlanRevokesOwnedGroupsFromUsersWithoutEmail(t *testing.T) {
+	in := snapshot()
+	in.Users = append(in.Users,
+		netbird.User{ID: "n6", Email: "", AutoGroups: []string{"g-hand", "g-alpha"}},
+		netbird.User{ID: "n7", Email: "  ", AutoGroups: []string{"g-old"}},
+	)
+	plan, err := BuildPlan(in, testOpt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string][]string{}
+	for _, u := range plan.Updates {
+		if u.User.ID == "n6" || u.User.ID == "n7" {
+			if len(u.Add) != 0 || len(u.Managed) != 0 {
+				t.Errorf("%s: add=%v managed=%v, want none", u.User.ID, u.Add, u.Managed)
+			}
+			got[u.User.ID] = u.Remove
+		}
+	}
+	want := map[string][]string{"n6": {"idp-alpha"}, "n7": {"idp-gone"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("removals = %v, want %v", got, want)
+	}
+	if plan.UsersWithoutEmail != 3 { // n5, n6, n7
+		t.Errorf("UsersWithoutEmail = %d, want 3", plan.UsersWithoutEmail)
+	}
+
+	w := &fakeWriter{}
+	if err := Apply(context.Background(), w, in, plan, testOpt, quiet); err != nil {
+		t.Fatal(err)
+	}
+	if ids := w.sets["n6"]; !reflect.DeepEqual(ids, []string{"g-hand"}) {
+		t.Errorf("n6 groups after apply = %v, want [g-hand]", ids)
+	}
+	if ids, ok := w.sets["n7"]; !ok || len(ids) != 0 {
+		t.Errorf("n7 groups after apply = %v, want []", ids)
+	}
+}
+
+// If NetBird suddenly reports no address for anyone (a renamed field, a
+// changed setting), every membership would go. That is doubtful input, like
+// an empty project list, and must stop the run.
+func TestBuildPlanRefusesWhenNoUserHasAnEmail(t *testing.T) {
+	in := snapshot()
+	for i := range in.Users {
+		in.Users[i].Email = ""
+	}
+	if _, err := BuildPlan(in, testOpt); err == nil {
+		t.Error("no NetBird user with an address: want error")
 	}
 }

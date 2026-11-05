@@ -60,8 +60,9 @@ type Plan struct {
 	// Orphaned are owned groups without a matching project. They are emptied
 	// by the updates above but never deleted.
 	Orphaned []string
-	// SkippedUsers counts NetBird users without an email address.
-	SkippedUsers int
+	// UsersWithoutEmail counts non-service NetBird users without an email
+	// address. They get no owned group, and lose any they hold.
+	UsersWithoutEmail int
 }
 
 // Removals is the number of memberships the plan takes away.
@@ -154,14 +155,18 @@ func BuildPlan(in Input, opt Options) (Plan, error) {
 
 	// populated are the desired groups at least one NetBird user belongs to.
 	populated := map[string]bool{}
+	humans := 0
 	for _, u := range in.Users {
 		if u.IsServiceUser {
 			continue
 		}
+		humans++
+		// A user without an address matches no grant, so it is entitled to no
+		// owned group. It still goes through the loop: what it holds is taken
+		// away, otherwise revocation would never reach it.
 		email := normalize(u.Email)
 		if email == "" {
-			plan.SkippedUsers++
-			continue
+			plan.UsersWithoutEmail++
 		}
 		have := map[string]bool{}
 		for _, id := range u.AutoGroups {
@@ -189,6 +194,12 @@ func BuildPlan(in Input, opt Options) (Plan, error) {
 		sort.Strings(upd.Remove)
 		sort.Strings(upd.Managed)
 		plan.Updates = append(plan.Updates, upd)
+	}
+
+	// No address at all is far more likely a changed API or setting than a
+	// real account, and acting on it would strip every membership.
+	if humans > 0 && plan.UsersWithoutEmail == humans {
+		return Plan{}, errors.New("netbird returned no user with an email address: refusing to remove all memberships")
 	}
 
 	for name := range desiredGroups {

@@ -94,8 +94,8 @@ func run(parent context.Context, cfg config.Config, zc *zitadel.Client, nc *netb
 	for _, name := range plan.Orphaned {
 		log.Warn("owned group has no matching project; members are removed, the group is kept", "group", name)
 	}
-	if plan.SkippedUsers > 0 {
-		log.Info("netbird users without an email address were skipped", "count", plan.SkippedUsers)
+	if plan.UsersWithoutEmail > 0 {
+		log.Info("netbird users without an email address get no synced group", "count", plan.UsersWithoutEmail)
 	}
 	log.Info("plan",
 		"projects", len(in.Projects), "grants", len(in.Grants), "netbird_users", len(in.Users),
