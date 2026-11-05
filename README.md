@@ -227,9 +227,15 @@ allows only DNS, your Zitadel and the NetBird API is a good fit.
 ## Verify the image
 
 ```sh
-gh attestation verify oci://ghcr.io/marcobockelbrink/zitadel-netbird-sync:<tag> \
-  --owner marcobockelbrink
+gh attestation verify oci://ghcr.io/marcobockelbrink/zitadel-netbird-sync:<version> \
+  --repo marcobockelbrink/zitadel-netbird-sync \
+  --signer-workflow marcobockelbrink/zitadel-netbird-sync/.github/workflows/release.yml \
+  --source-ref refs/tags/v<version>
 ```
+
+`--owner` alone would accept an attestation from any repository or workflow of
+the account. These flags pin it to this repository's release workflow and the
+tag it was built from.
 
 ## Development
 
