@@ -3,6 +3,7 @@ package netbird
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -100,5 +101,39 @@ func TestErrorDoesNotLeakBody(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "private detail") || strings.Contains(err.Error(), "tok") {
 		t.Errorf("error leaks response body or token: %v", err)
+	}
+}
+
+// User reads one user's current state right before a write.
+func TestUserReadsCurrentState(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/users" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		fmt.Fprint(w, `[{"id":"u1","role":"admin"},{"id":"u2","role":"user","is_blocked":true,"auto_groups":["g1"]}]`)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "tok", srv.Client())
+	u, err := c.User(context.Background(), "u2")
+	if err != nil || u.ID != "u2" || !u.IsBlocked || u.Role != "user" || len(u.AutoGroups) != 1 {
+		t.Errorf("got %+v, %v", u, err)
+	}
+	if _, err := c.User(context.Background(), "gone"); !errors.Is(err, ErrUserNotFound) {
+		t.Errorf("missing user: err = %v, want ErrUserNotFound", err)
+	}
+}
+
+// The user was in the snapshot seconds earlier. An empty list is a fault, not
+// proof that the user is gone, and must not let the write be skipped silently.
+func TestUserFailsOnEmptyList(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `[]`)
+	}))
+	defer srv.Close()
+
+	_, err := New(srv.URL, "tok", srv.Client()).User(context.Background(), "u1")
+	if err == nil || errors.Is(err, ErrUserNotFound) {
+		t.Errorf("err = %v, want an error other than ErrUserNotFound", err)
 	}
 }

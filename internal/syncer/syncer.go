@@ -216,6 +216,8 @@ func BuildPlan(in Input, opt Options) (Plan, error) {
 
 // Writer is the part of the NetBird client that Apply needs.
 type Writer interface {
+	// User returns a user's current state, or netbird.ErrUserNotFound.
+	User(ctx context.Context, id string) (netbird.User, error)
 	CreateGroup(ctx context.Context, name string) (netbird.Group, error)
 	SetUserGroups(ctx context.Context, u netbird.User, groupIDs []string) error
 }
@@ -233,6 +235,9 @@ func Apply(ctx context.Context, w Writer, in Input, plan Plan, opt Options, log 
 		}
 	}
 	for _, name := range plan.CreateGroups {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		g, err := w.CreateGroup(ctx, name)
 		if err != nil {
 			return fmt.Errorf("create group %q: %w", name, err)
@@ -244,9 +249,27 @@ func Apply(ctx context.Context, w Writer, in Input, plan Plan, opt Options, log 
 
 	var failed int
 	for _, upd := range plan.Updates {
-		// Keep every group the sync does not own, in its existing order.
-		ids := make([]string, 0, len(upd.User.AutoGroups)+len(upd.Managed))
-		for _, id := range upd.User.AutoGroups {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		// The snapshot may be minutes old. An admin may have blocked, demoted
+		// or regrouped the user since; the write must keep that, so it starts
+		// from the user's current state.
+		cur, err := w.User(ctx, upd.User.ID)
+		if errors.Is(err, netbird.ErrUserNotFound) {
+			log.Info("user no longer exists, skipped", "user_id", upd.User.ID)
+			continue
+		}
+		if err != nil {
+			failed++
+			log.Error("user read failed", "user_id", upd.User.ID, "error", err.Error())
+			continue
+		}
+		// Keep every group the sync does not own, in its existing order. An
+		// owned group created by hand after the snapshot counts as foreign
+		// here; the next run sees it.
+		ids := make([]string, 0, len(cur.AutoGroups)+len(upd.Managed))
+		for _, id := range cur.AutoGroups {
 			if !owned[id] {
 				ids = append(ids, id)
 			}
@@ -258,7 +281,7 @@ func Apply(ctx context.Context, w Writer, in Input, plan Plan, opt Options, log 
 			}
 			ids = append(ids, id)
 		}
-		if err := w.SetUserGroups(ctx, upd.User, ids); err != nil {
+		if err := w.SetUserGroups(ctx, cur, ids); err != nil {
 			failed++
 			log.Error("user update failed", "user_id", upd.User.ID, "error", err.Error())
 			continue

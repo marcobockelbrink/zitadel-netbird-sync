@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -68,7 +69,7 @@ func (c *Client) Users(ctx context.Context) ([]User, error) {
 }
 
 // SetUserGroups replaces the user's group list. Role and blocked state are
-// sent back exactly as they were read.
+// sent back exactly as they were read; read u with User right before the call.
 func (c *Client) SetUserGroups(ctx context.Context, u User, groupIDs []string) error {
 	if groupIDs == nil {
 		groupIDs = []string{}
@@ -113,4 +114,28 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 		return fmt.Errorf("netbird %s %s: decode response: %w", method, path, err)
 	}
 	return nil
+}
+
+// ErrUserNotFound means the user no longer exists in the account.
+var ErrUserNotFound = errors.New("netbird: user not found")
+
+// User returns the user's current state. The API has no lookup by ID, so it
+// reads the list. Apply calls it right before each write, so a write starts
+// from what NetBird holds at that moment and not from the run's snapshot.
+func (c *Client) User(ctx context.Context, id string) (User, error) {
+	users, err := c.Users(ctx)
+	if err != nil {
+		return User{}, err
+	}
+	// The caller saw this user seconds ago; an empty list is a fault, not
+	// proof that the user is gone.
+	if len(users) == 0 {
+		return User{}, errors.New("netbird: user list is empty")
+	}
+	for _, u := range users {
+		if u.ID == id {
+			return u, nil
+		}
+	}
+	return User{}, ErrUserNotFound
 }
