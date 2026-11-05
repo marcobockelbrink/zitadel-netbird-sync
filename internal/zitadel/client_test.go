@@ -133,3 +133,44 @@ func TestActiveGrantsEmptyOrganization(t *testing.T) {
 		t.Errorf("got %v, %v; want empty list without error", got, err)
 	}
 }
+
+// An entry deleted between two page requests shifts the rest of the list, so
+// another entry is silently skipped. A total that changes while paging must
+// stop the run.
+func TestSearchFailsWhenListChangesWhilePaging(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Query struct {
+				Offset int `json:"offset"`
+			} `json:"query"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		calls++
+		total := 150
+		if calls > 1 {
+			total = 149 // one entry on page 1 was deleted meanwhile
+		}
+		var items []string
+		for i := req.Query.Offset; i < total && len(items) < 100; i++ {
+			items = append(items, fmt.Sprintf(`{"id":"%d","name":"p%d","state":"PROJECT_STATE_ACTIVE"}`, i, i))
+		}
+		fmt.Fprintf(w, `{"details":{"totalResult":"%d"},"result":[%s]}`, total, strings.Join(items, ","))
+	}))
+	defer srv.Close()
+
+	if _, err := New(srv.URL, "secret", "", srv.Client()).ActiveProjects(context.Background()); err == nil {
+		t.Fatal("want error when the total changes between pages")
+	}
+}
+
+// More entries than the reported total means the total cannot be trusted.
+func TestSearchFailsWhenPageExceedsTotal(t *testing.T) {
+	calls := 0
+	srv := pagedServer(t, 10, 100, 5, &calls)
+	defer srv.Close()
+
+	if _, err := New(srv.URL, "secret", "org1", srv.Client()).ActiveProjects(context.Background()); err == nil {
+		t.Fatal("want error when a page holds more entries than the reported total")
+	}
+}

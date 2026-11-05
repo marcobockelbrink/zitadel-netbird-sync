@@ -118,9 +118,10 @@ func (c *Client) ActiveUserEmails(ctx context.Context) (map[string]string, error
 
 // search pages through a Zitadel list endpoint. It trusts the reported total
 // rather than the page length, and fails instead of returning a partial list:
-// a short list would look like revoked grants to the caller.
+// a short list would look like revoked grants to the caller. A total that
+// changes between pages, or more entries than reported, fails as well.
 func (c *Client) search(ctx context.Context, path string, each func(json.RawMessage) error) error {
-	offset := 0
+	offset, first := 0, -1
 	for {
 		body := map[string]any{"query": map[string]any{"offset": offset, "limit": pageSize, "asc": true}}
 		var page struct {
@@ -142,7 +143,17 @@ func (c *Client) search(ctx context.Context, path string, each func(json.RawMess
 		if err != nil {
 			return fmt.Errorf("zitadel %s: %w", path, err)
 		}
-		if offset >= total {
+		// Offset paging is only sound if the list holds still. An entry
+		// deleted meanwhile shifts the rest, and another one is skipped.
+		if first < 0 {
+			first = total
+		} else if total != first {
+			return fmt.Errorf("zitadel %s: list changed while paging (%d, then %d entries)", path, first, total)
+		}
+		if offset > total {
+			return fmt.Errorf("zitadel %s: got %d entries, more than the reported %d", path, offset, total)
+		}
+		if offset == total {
 			return nil
 		}
 		if len(page.Result) == 0 {
