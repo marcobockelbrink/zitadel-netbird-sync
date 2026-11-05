@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/marcobockelbrink/zitadel-netbird-sync/internal/netbird"
 	"github.com/marcobockelbrink/zitadel-netbird-sync/internal/zitadel"
@@ -90,15 +91,36 @@ func BuildPlan(in Input, opt Options) (Plan, error) {
 	}
 
 	// Desired groups: one per selected project.
+	// Two projects must never feed one group: members of one would gain the
+	// other's access.
 	groupOfProject := map[string]string{}
+	projectOfGroup := map[string]string{}
 	desiredGroups := map[string]bool{}
 	for _, p := range in.Projects {
 		if !selected(p.Name, opt) {
 			continue
 		}
 		name := groupName(p.Name, opt)
+		if other, taken := projectOfGroup[name]; taken {
+			return Plan{}, fmt.Errorf("projects %s and %s both map to group %q: rename one or exclude it", other, p.ID, name)
+		}
+		projectOfGroup[name] = p.ID
 		groupOfProject[p.ID] = name
 		desiredGroups[name] = true
+	}
+
+	// One address must stand for one person, or two accounts would share the
+	// grants. Errors name IDs only, never addresses.
+	netbirdOfEmail := map[string]string{}
+	for _, u := range in.Users {
+		email := normalize(u.Email)
+		if u.IsServiceUser || email == "" {
+			continue
+		}
+		if other, dup := netbirdOfEmail[email]; dup {
+			return Plan{}, fmt.Errorf("netbird users %s and %s share one email address: resolve it first", other, u.ID)
+		}
+		netbirdOfEmail[email] = u.ID
 	}
 
 	// Existing groups, and which of them are owned.
@@ -127,6 +149,7 @@ func BuildPlan(in Input, opt Options) (Plan, error) {
 	}
 
 	// Desired membership per email address.
+	zitadelOfEmail := map[string]string{}
 	want := map[string]map[string]bool{}
 	for _, g := range in.Grants {
 		group, ok := groupOfProject[g.ProjectID]
@@ -137,6 +160,13 @@ func BuildPlan(in Input, opt Options) (Plan, error) {
 		if email == "" {
 			continue
 		}
+		// Only users with a synced grant matter; a duplicate elsewhere in the
+		// directory changes nothing and must not stop the run.
+		if other, dup := zitadelOfEmail[email]; dup && other != g.UserID {
+			a, b := min(other, g.UserID), max(other, g.UserID)
+			return Plan{}, fmt.Errorf("zitadel users %s and %s share one email address: resolve it first", a, b)
+		}
+		zitadelOfEmail[email] = g.UserID
 		if want[email] == nil {
 			want[email] = map[string]bool{}
 		}
@@ -318,4 +348,15 @@ func contains(list []string, s string) bool {
 	return false
 }
 
-func normalize(email string) string { return strings.ToLower(strings.TrimSpace(email)) }
+// normalize folds ASCII case only. An address with any other character is
+// treated as missing: Unicode case folding maps distinct addresses onto one
+// (KELVIN SIGN U+212A lowercases to "k").
+func normalize(email string) string {
+	email = strings.TrimSpace(email)
+	for i := 0; i < len(email); i++ {
+		if email[i] >= utf8.RuneSelf {
+			return ""
+		}
+	}
+	return strings.ToLower(email)
+}

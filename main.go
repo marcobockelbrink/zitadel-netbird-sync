@@ -33,7 +33,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	hc := &http.Client{Timeout: 30 * time.Second}
+	hc := newHTTPClient()
 	zc := zitadel.New(cfg.ZitadelURL, cfg.ZitadelToken, cfg.ZitadelOrgID, hc)
 	nc := netbird.New(cfg.NetbirdURL, cfg.NetbirdToken, hc)
 	opt := syncer.Options{Prefix: cfg.GroupPrefix, Lowercase: cfg.LowercaseNames, Include: cfg.Include, Exclude: cfg.Exclude, CreateEmpty: cfg.CreateEmptyGroups, AllGroup: cfg.AllGroup}
@@ -118,4 +118,16 @@ func run(parent context.Context, cfg config.Config, zc *zitadel.Client, nc *netb
 		return nil
 	}
 	return syncer.Apply(ctx, nc, in, plan, opt, log)
+}
+
+// newHTTPClient returns the client for both APIs. Neither redirects; following
+// one could carry a token to another address or over plain http, so a
+// redirect is returned as it is and fails as an unexpected status.
+func newHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 }

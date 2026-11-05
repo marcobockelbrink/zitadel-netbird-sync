@@ -517,3 +517,90 @@ func TestBuildPlanRefusesWhenNoUserHasAnEmail(t *testing.T) {
 		t.Error("no NetBird user with an address: want error")
 	}
 }
+
+// Two projects whose names differ only by case or surrounding spaces would
+// feed one group, so members of one project would gain the other's access.
+func TestBuildPlanRefusesProjectsSharingAGroup(t *testing.T) {
+	in := snapshot()
+	in.Projects = append(in.Projects, zitadel.Project{ID: "p9", Name: "alpha "})
+	if _, err := BuildPlan(in, testOpt); err == nil {
+		t.Error(`"Alpha" and "alpha ": want error, both map to idp-alpha`)
+	}
+
+	in = snapshot()
+	in.Projects = append(in.Projects, zitadel.Project{ID: "p9", Name: "ALPHA"})
+	opt := testOpt
+	opt.Lowercase = false
+	if _, err := BuildPlan(in, opt); err != nil {
+		t.Errorf(`"Alpha" and "ALPHA" without lowercasing are distinct groups: %v`, err)
+	}
+}
+
+// One address must stand for one person on each side. Two accounts sharing an
+// address would both receive the grants.
+func TestBuildPlanRefusesSharedEmail(t *testing.T) {
+	in := snapshot()
+	in.Users = append(in.Users, netbird.User{ID: "n8", Email: " ANN@example.org"})
+	if _, err := BuildPlan(in, testOpt); err == nil {
+		t.Error("two NetBird users with one address: want error")
+	} else if strings.Contains(err.Error(), "example.org") {
+		t.Errorf("error names an address: %v", err)
+	}
+
+	in = snapshot()
+	in.Emails["z9"] = "bob@EXAMPLE.org"
+	in.Grants = append(in.Grants, zitadel.Grant{UserID: "z9", ProjectID: "p2"})
+	_, err := BuildPlan(in, testOpt)
+	if err == nil {
+		t.Fatal("two Zitadel users with one address, both granted: want error")
+	}
+	if strings.Contains(err.Error(), "example.org") {
+		t.Errorf("error names an address: %v", err)
+	}
+
+	// A duplicate among users without a grant on a synced project changes
+	// nothing and must not stop the run for everyone else.
+	in = snapshot()
+	in.Emails["z9"] = "bob@EXAMPLE.org"
+	if _, err := BuildPlan(in, testOpt); err != nil {
+		t.Errorf("duplicate without a synced grant: %v", err)
+	}
+}
+
+// Unicode case folding maps distinct addresses onto one (KELVIN SIGN U+212A
+// lowercases to "k"). Addresses outside ASCII are therefore never matched.
+func TestBuildPlanIgnoresNonASCIIEmail(t *testing.T) {
+	in := snapshot()
+	in.Grants = append(in.Grants, zitadel.Grant{UserID: "z4", ProjectID: "p1"})
+	in.Emails["z4"] = "kate@example.org"
+	in.Users = append(in.Users, netbird.User{ID: "n9", Email: "Kate@example.org"})
+	plan, err := BuildPlan(in, testOpt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range plan.Updates {
+		if u.User.ID == "n9" {
+			t.Errorf("n9 (Kelvin sign) got %v, want nothing", u.Add)
+		}
+	}
+}
+
+// An address outside ASCII counts as missing, so a user who holds a synced
+// group under such an address loses it like any user without an address.
+func TestBuildPlanRevokesFromNonASCIIEmail(t *testing.T) {
+	in := snapshot()
+	in.Users = append(in.Users, netbird.User{ID: "n9", Email: "jürgen@example.org", AutoGroups: []string{"g-hand", "g-alpha"}})
+	plan, err := BuildPlan(in, testOpt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range plan.Updates {
+		if u.User.ID == "n9" {
+			if !reflect.DeepEqual(u.Remove, []string{"idp-alpha"}) || len(u.Add) != 0 {
+				t.Errorf("n9: add=%v remove=%v, want remove [idp-alpha] only", u.Add, u.Remove)
+			}
+			return
+		}
+	}
+	t.Error("n9 has no update, want idp-alpha removed")
+}

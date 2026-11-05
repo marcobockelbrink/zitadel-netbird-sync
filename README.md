@@ -67,6 +67,16 @@ no state of its own.
   memberships changes nothing and fails.
 - **Verified addresses only.** A Zitadel user whose email address is not
   verified gets no membership.
+- **One address, one person.** If two NetBird users, or two Zitadel users with
+  a grant on a synced project, share an email address, the run fails. Addresses with characters outside ASCII are
+  never matched.
+- **One project, one group.** If two projects map to the same group name (they
+  differ only in case or surrounding spaces), the run fails.
+- **Stable lists.** If the total Zitadel reports changes while a list is being
+  paged, or more entries arrive than reported, the run fails; the next run
+  reads it again.
+- **No redirects.** Neither API is followed to another address, so a token
+  never leaves the configured URL.
 
 ## Configuration
 
