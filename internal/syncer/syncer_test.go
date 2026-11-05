@@ -138,7 +138,33 @@ func TestBuildPlanInclude(t *testing.T) {
 type fakeWriter struct {
 	created []string
 	sets    map[string][]string
+	sent    map[string]netbird.User
 	failFor string
+	// readFailFor makes the read before the write fail for this user.
+	readFailFor string
+	// current is NetBird's state at write time, which may differ from the
+	// snapshot the plan was built from.
+	current map[string]netbird.User
+}
+
+// newFakeWriter starts with NetBird's current state equal to the snapshot.
+func newFakeWriter(in Input) *fakeWriter {
+	f := &fakeWriter{current: map[string]netbird.User{}}
+	for _, u := range in.Users {
+		f.current[u.ID] = u
+	}
+	return f
+}
+
+func (f *fakeWriter) User(_ context.Context, id string) (netbird.User, error) {
+	if id == f.readFailFor {
+		return netbird.User{}, errors.New("read boom")
+	}
+	u, ok := f.current[id]
+	if !ok {
+		return netbird.User{}, netbird.ErrUserNotFound
+	}
+	return u, nil
 }
 
 func (f *fakeWriter) CreateGroup(_ context.Context, name string) (netbird.Group, error) {
@@ -154,6 +180,10 @@ func (f *fakeWriter) SetUserGroups(_ context.Context, u netbird.User, ids []stri
 		f.sets = map[string][]string{}
 	}
 	f.sets[u.ID] = ids
+	if f.sent == nil {
+		f.sent = map[string]netbird.User{}
+	}
+	f.sent[u.ID] = u
 	return nil
 }
 
@@ -165,7 +195,7 @@ func TestApplyKeepsForeignGroups(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := &fakeWriter{}
+	w := newFakeWriter(in)
 	if err := Apply(context.Background(), w, in, plan, testOpt, quiet); err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +215,8 @@ func TestApplyKeepsForeignGroups(t *testing.T) {
 func TestApplyContinuesAfterUserFailure(t *testing.T) {
 	in := snapshot()
 	plan, _ := BuildPlan(in, testOpt)
-	w := &fakeWriter{failFor: "n1"}
+	w := newFakeWriter(in)
+	w.failFor = "n1"
 	if err := Apply(context.Background(), w, in, plan, testOpt, quiet); err == nil {
 		t.Fatal("want error for the failed update")
 	}
@@ -231,7 +262,7 @@ func FuzzBuildPlanStaysInsidePrefix(f *testing.F) {
 		}
 
 		// Applying the plan must keep every group the sync does not own.
-		w := &fakeWriter{}
+		w := newFakeWriter(in)
 		if err := Apply(context.Background(), w, in, plan, opt, quiet); err != nil {
 			t.Fatal(err)
 		}
@@ -249,7 +280,7 @@ func FuzzBuildPlanStaysInsidePrefix(f *testing.F) {
 func TestPlanIsStableAfterApply(t *testing.T) {
 	in := snapshot()
 	plan, _ := BuildPlan(in, testOpt)
-	w := &fakeWriter{}
+	w := newFakeWriter(in)
 	if err := Apply(context.Background(), w, in, plan, testOpt, quiet); err != nil {
 		t.Fatal(err)
 	}
@@ -352,6 +383,86 @@ func TestBuildPlanAllGroupCollision(t *testing.T) {
 	}
 }
 
+// An admin may block, demote or regroup a user while a run is under way. The
+// write must start from NetBird's state at that moment, not from the snapshot:
+// it must never unblock, re-promote or re-add a hand-kept group.
+func TestApplyUsesCurrentUserStateNotSnapshot(t *testing.T) {
+	in := snapshot()
+	plan, err := BuildPlan(in, testOpt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := newFakeWriter(in)
+	// After the snapshot: n1 (admin, in team-alpha) was blocked, demoted and
+	// taken out of team-alpha by hand.
+	w.current["n1"] = netbird.User{ID: "n1", Email: "ann@example.org", Role: "user", IsBlocked: true, AutoGroups: []string{"g-old"}}
+	// n3 was deleted.
+	delete(w.current, "n3")
+
+	if err := Apply(context.Background(), w, in, plan, testOpt, quiet); err != nil {
+		t.Fatal(err)
+	}
+	sent := w.sent["n1"]
+	if !sent.IsBlocked || sent.Role != "user" {
+		t.Errorf("n1 sent with role=%q blocked=%v, want the current role=user blocked=true", sent.Role, sent.IsBlocked)
+	}
+	if ids := w.sets["n1"]; !reflect.DeepEqual(ids, []string{"g-alpha"}) {
+		t.Errorf("n1 groups = %v, want [g-alpha] (team-alpha must not come back)", ids)
+	}
+	if _, ok := w.sets["n3"]; ok {
+		t.Error("n3 no longer exists and must not be written")
+	}
+}
+
+// A failed read is a failed update: nothing is written for that user, the
+// others go on, and the run reports the failure.
+func TestApplyCountsFailedReadAsFailure(t *testing.T) {
+	in := snapshot()
+	plan, _ := BuildPlan(in, testOpt)
+	w := newFakeWriter(in)
+	w.readFailFor = "n1"
+	if err := Apply(context.Background(), w, in, plan, testOpt, quiet); err == nil {
+		t.Fatal("want error for the failed read")
+	}
+	if _, ok := w.sets["n1"]; ok {
+		t.Error("n1 must not be written after a failed read")
+	}
+	if len(w.sets) != 2 {
+		t.Errorf("updated %d users, want the other 2", len(w.sets))
+	}
+}
+
+// A hand-kept group added after the snapshot survives the write.
+func TestApplyKeepsHandGroupAddedDuringRun(t *testing.T) {
+	in := snapshot()
+	plan, _ := BuildPlan(in, testOpt)
+	w := newFakeWriter(in)
+	n2 := w.current["n2"]
+	n2.AutoGroups = []string{"g-alpha", "g-new-hand"}
+	w.current["n2"] = n2
+	if err := Apply(context.Background(), w, in, plan, testOpt, quiet); err != nil {
+		t.Fatal(err)
+	}
+	if ids := w.sets["n2"]; !slices.Contains(ids, "g-new-hand") {
+		t.Errorf("n2 groups = %v, want g-new-hand kept", ids)
+	}
+}
+
+// After cancellation nothing more is attempted.
+func TestApplyStopsWhenCancelled(t *testing.T) {
+	in := snapshot()
+	plan, _ := BuildPlan(in, testOpt)
+	w := newFakeWriter(in)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := Apply(ctx, w, in, plan, testOpt, quiet); !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+	if len(w.sets) != 0 {
+		t.Errorf("wrote %d users after cancellation, want 0", len(w.sets))
+	}
+}
+
 // A NetBird user whose email is missing cannot be matched to any grant, so it
 // is entitled to no owned group. Revocation must still reach it; groups the
 // sync does not own stay untouched.
@@ -382,7 +493,7 @@ func TestBuildPlanRevokesOwnedGroupsFromUsersWithoutEmail(t *testing.T) {
 		t.Errorf("UsersWithoutEmail = %d, want 3", plan.UsersWithoutEmail)
 	}
 
-	w := &fakeWriter{}
+	w := newFakeWriter(in)
 	if err := Apply(context.Background(), w, in, plan, testOpt, quiet); err != nil {
 		t.Fatal(err)
 	}
