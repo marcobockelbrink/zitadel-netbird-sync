@@ -26,6 +26,9 @@ jobs:
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
       - name: Vet
         run: go vet ./...
+      # Rules in .golangci.yml; the version stays here so an update is a commit.
+      - name: Lint
+        run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 run ./...
       - name: Test
         run: go test -race -count=1 ./...
       - name: Fuzz

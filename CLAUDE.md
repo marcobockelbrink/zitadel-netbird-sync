@@ -8,6 +8,7 @@ groups. Public repository: nothing in it may point to a specific organization.
 ```sh
 go test -race -count=1 ./...   # all tests
 go vet ./... && gofmt -l .     # must print nothing
+go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 run ./...   # rules in .golangci.yml, version as in ci.yml
 go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 docker build -t zns:local .
 ```
