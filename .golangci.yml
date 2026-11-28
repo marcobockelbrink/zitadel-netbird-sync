@@ -1,0 +1,22 @@
+# golangci-lint, runs in CI after gofmt (the version is set in .github/workflows/ci.yml).
+# The standard linters, listed explicitly so a new version does not switch on more.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+  settings:
+    staticcheck:
+      # Without the QF rewrite suggestions (De Morgan, tagged switch, ...): style, not bugs.
+      # The -ST... entries are staticcheck's own default exclusions, nothing more.
+      checks: ["all", "-QF*", "-ST1000", "-ST1003", "-ST1016", "-ST1020", "-ST1021", "-ST1022"]
+  exclusions:
+    generated: lax
+    presets:
+      # Unchecked Close/Fprint, as Go code usually writes them.
+      - std-error-handling
